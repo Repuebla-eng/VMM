@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Control de Mantenimiento Vehicular (IndexedDB)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0f7ff',
+                            100: '#e0effe',
+                            500: '#0284c7',
+                            600: '#0284c7',
+                            800: '#075985',
+                            900: '#0f172a',
+                        },
+                        accent: {
+                            500: '#10b981',
+                            600: '#059669',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+        }
+        input, textarea, select {
+            user-select: auto;
+        }
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans antialiased min-h-screen flex flex-col justify-between pb-20">
+
+    <!-- Screen de Aplicación Cerrada (Hidden por defecto) -->
+    <div id="screen-exit" class="fixed inset-0 bg-slate-900 z-50 flex flex-col items-center justify-center p-6 text-center hidden">
+        <div class="w-16 h-16 bg-slate-800 text-brand-500 rounded-2xl border border-slate-700 flex items-center justify-center text-2xl mb-4 shadow-xl">
+            <i class="fa-solid fa-lock"></i>
+        </div>
+        <h2 class="text-lg font-bold text-slate-100 mb-2">Aplicación Cerrada</h2>
+        <p class="text-xs text-slate-400 max-w-xs mb-6">Tus datos en IndexedDB están guardados de forma segura. Ya puedes cerrar esta pestaña o la aplicación.</p>
+        <button onclick="reopenApp()" class="bg-brand-500 hover:bg-brand-600 text-white font-bold py-2.5 px-6 rounded-xl text-xs transition-all flex items-center gap-2">
+            <i class="fa-solid fa-rotate-left"></i> Volver a Abrir App
+        </button>
+    </div>
+
+    <!-- Header Principal -->
+    <header class="bg-slate-800 border-b border-slate-700 sticky top-0 z-30 shadow-md">
+        <div class="max-w-md mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-brand-500/20 text-brand-500 flex items-center justify-center font-bold text-xl border border-brand-500/30">
+                    <i class="fa-solid fa-truck-pickup"></i>
+                </div>
+                <div>
+                    <h1 id="header-vehicle-name" class="font-bold text-slate-100 text-base leading-tight">Cargando...</h1>
+                    <p id="header-vehicle-plate" class="text-xs text-slate-400 font-mono tracking-wide">---</p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-2">
+                <button onclick="openModal('modal-update-km')" class="bg-slate-700 active:bg-slate-600 border border-slate-600 px-2.5 py-1.5 rounded-lg flex items-center space-x-1.5 text-xs text-brand-500 font-medium transition-colors">
+                    <i class="fa-solid fa-gauge"></i>
+                    <span id="header-km-display">0 km</span>
+                </button>
+                <button onclick="exitApp()" title="Salir de la aplicación" class="bg-red-500/10 active:bg-red-500/20 border border-red-500/30 px-2.5 py-1.5 rounded-lg text-xs text-red-400 font-medium transition-colors flex items-center justify-center">
+                    <i class="fa-solid fa-right-from-bracket"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Contenido Principal Cambiante por Pestañas -->
+    <main class="max-w-md mx-auto w-full flex-1 px-4 py-4 space-y-4">
+
+        <!-- TAB 1: RESUMEN / DASHBOARD -->
+        <section id="tab-dashboard" class="tab-content space-y-4">
+            
+            <!-- Banner Alerta Rápida -->
+            <div id="alert-summary-banner" class="hidden bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-start space-x-3">
+                <i class="fa-solid fa-triangle-exclamation text-amber-500 text-xl mt-0.5"></i>
+                <div class="flex-1">
+                    <h3 class="text-sm font-semibold text-amber-400">Atención requerida</h3>
+                    <p id="alert-summary-text" class="text-xs text-slate-300 mt-1">Mantenimientos pendientes o cercanos a vencer.</p>
+                </div>
+            </div>
+
+            <!-- Stats Rápidas (3 Métricas) -->
+            <div class="grid grid-cols-3 gap-2">
+                <div class="bg-slate-800/80 border border-slate-700/60 p-3 rounded-2xl">
+                    <div class="text-slate-400 text-[10px] font-medium mb-1 truncate">Gasto Total</div>
+                    <div id="stat-total-cost" class="text-base font-bold text-white truncate">$0</div>
+                    <div class="text-[9px] text-slate-400 mt-0.5">Acumulado</div>
+                </div>
+
+                <div class="bg-slate-800/80 border border-slate-700/60 p-3 rounded-2xl">
+                    <div class="text-slate-400 text-[10px] font-medium mb-1 truncate">Promedio/Serv</div>
+                    <div id="stat-avg-cost" class="text-base font-bold text-white truncate">$0</div>
+                    <div class="text-[9px] text-slate-400 mt-0.5">Por servicio</div>
+                </div>
+
+                <div class="bg-slate-800/80 border border-slate-700/60 p-3 rounded-2xl">
+                    <div class="text-slate-400 text-[10px] font-medium mb-1 truncate">Costo / Km</div>
+                    <div id="stat-cost-per-km" class="text-base font-bold text-accent-500 truncate">$0.00</div>
+                    <div class="text-[9px] text-slate-400 mt-0.5">Estimado por km</div>
+                </div>
+            </div>
+
+            <!-- Ficha del Vehículo -->
+            <div class="bg-slate-800 border border-slate-700/80 rounded-2xl p-4 space-y-3">
+                <div class="flex justify-between items-center border-b border-slate-700 pb-2">
+                    <h2 class="text-sm font-bold text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-id-card text-brand-500"></i> Ficha del Vehículo
+                    </h2>
+                    <button onclick="openEditVehicleModal()" class="text-xs text-brand-500 hover:text-brand-400 font-medium flex items-center gap-1">
+                        <i class="fa-solid fa-pen-to-square"></i> Editar
+                    </button>
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                        <span class="text-slate-400 block text-[11px]">Marca / Modelo:</span>
+                        <span id="info-brand-model" class="font-semibold text-slate-200">-</span>
+                    </div>
+                    <div>
+                        <span class="text-slate-400 block text-[11px]">Año:</span>
+                        <span id="info-year" class="font-semibold text-slate-200">-</span>
+                    </div>
+                    <div>
+                        <span class="text-slate-400 block text-[11px]">Matrícula / Patente:</span>
+                        <span id="info-plate" class="font-semibold text-slate-200 font-mono">-</span>
+                    </div>
+                    <div>
+                        <span class="text-slate-400 block text-[11px]">Kilometraje Actual:</span>
+                        <span id="info-km" class="font-semibold text-slate-200">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Último Servicio -->
+            <div class="bg-slate-800 border border-slate-700/80 rounded-2xl p-4">
+                <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">Último Mantenimiento Realizado</h3>
+                <div id="dashboard-last-service" class="text-sm text-slate-400 text-center py-2">
+                    Cargando información...
+                </div>
+            </div>
+        </section>
+
+        <!-- TAB 2: REGISTRAR / EDITAR SERVICIO -->
+        <section id="tab-add" class="tab-content hidden space-y-4">
+            <div class="bg-slate-800 border border-slate-700/80 rounded-2xl p-5 shadow-lg">
+                <h2 id="form-service-title" class="text-base font-bold text-slate-100 mb-4 flex items-center gap-2">
+                    <i class="fa-solid fa-circle-plus text-accent-500"></i> Nuevo Mantenimiento
+                </h2>
+                
+                <form id="form-add-service" onsubmit="handleSaveService(event)" class="space-y-4 text-xs">
+                    <input type="hidden" id="input-service-id">
+
+                    <div>
+                        <label class="block text-slate-300 font-medium mb-1">Fecha del Servicio *</label>
+                        <input type="date" id="input-service-date" required class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:border-brand-500">
+                    </div>
+
+                    <div>
+                        <label class="block text-slate-300 font-medium mb-1">Tipo de Servicio *</label>
+                        <select id="input-service-type" required class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:border-brand-500">
+                            <option value="">Seleccionar opción...</option>
+                            <option value="Cambio de aceite y filtro">Cambio de aceite y filtro</option>
+                            <option value="Frenos">Frenos (Pastillas/Discos)</option>
+                            <option value="Neumáticos">Neumáticos / Cubiertas</option>
+                            <option value="Correa de distribución">Correa de distribución / Cadena</option>
+                            <option value="Filtros">Filtros (Aire/Combustible/Habitáculo)</option>
+                            <option value="Alineación y balanceo">Alineación y balanceo</option>
+                            <option value="Inspección general">Inspección general / Service oficial</option>
+                            <option value="ITV/VTV">ITV / VTV / Inspección Técnica</option>
+                            <option value="Reparación">Reparación mecánica</option>
+                            <option value="Batería">Cambio de Batería</option>
+                            <option value="Otro">Otro</option>
+                        </select>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-slate-300 font-medium mb-1">Km al realizar *</label>
+                            <input type="number" id="input-service-km" required min="0" placeholder="Ej: 45000" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:border-brand-500">
+                        </div>
+                        <div>
+                            <label class="block text-slate-300 font-medium mb-1">Costo ($) *</label>
+                            <input type="number" id="input-service-cost" step="0.01" min="0" required placeholder="0.00" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:border-brand-500">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-slate-300 font-medium mb-1">Taller / Mecánico</label>
+                        <input type="text" id="input-service-workshop" placeholder="Ej: Taller Oficial Fiat" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:border-brand-500">
+                    </div>
+
+                    <div>
+                        <label class="block text-slate-300 font-medium mb-1">Notas / Observaciones</label>
+                        <textarea id="input-service-notes" rows="2" placeholder="Detalles de repuestos, marcas, etc." class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 focus:outline-none focus:border-brand-500 resize-none"></textarea>
+                    </div>
+
+                    <!-- Recordatorio del próximo servicio -->
+                    <div class="pt-2 border-t border-slate-700/80">
+                        <span class="block text-xs font-semibold text-slate-300 mb-2">Próximo Mantenimiento Sugerido (Opcional)</span>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-slate-400 text-[11px] mb-1">Próximo Cambio (Km)</label>
+                                <input type="number" id="input-next-km" placeholder="Ej: 55000" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-brand-500">
+                            </div>
+                            <div>
+                                <label class="block text-slate-400 text-[11px] mb-1">Próxima Fecha</label>
+                                <input type="date" id="input-next-date" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-brand-500">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex gap-2 pt-2">
+                        <button type="button" id="btn-cancel-edit" onclick="resetServiceForm()" class="hidden w-1/3 bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold py-3 px-3 rounded-xl transition-all text-xs">
+                            Cancelar
+                        </button>
+                        <button type="submit" id="btn-save-service" class="w-full bg-brand-500 hover:bg-brand-600 active:scale-[0.98] text-white font-bold py-3 px-4 rounded-xl shadow-md transition-all text-xs flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-floppy-disk"></i> Guardar Mantenimiento
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </section>
+
+        <!-- TAB 3: HISTORIAL DE MANTENIMIENTOS -->
+        <section id="tab-history" class="tab-content hidden space-y-4">
+            <!-- Filtro y Buscador -->
+            <div class="bg-slate-800 border border-slate-700/80 rounded-2xl p-3 space-y-2">
+                <div class="relative">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-500 text-xs"></i>
+                    <input type="text" id="search-history" oninput="renderHistory()" placeholder="Buscar por tipo, taller o notas..." class="w-full bg-slate-900 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-brand-500">
+                </div>
+                <div class="flex gap-2">
+                    <select id="filter-service-type" onchange="renderHistory()" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-300 focus:outline-none">
+                        <option value="ALL">Todos los tipos de servicio</option>
+                        <option value="Cambio de aceite y filtro">Cambio de aceite y filtro</option>
+                        <option value="Frenos">Frenos</option>
+                        <option value="Neumáticos">Neumáticos</option>
+                        <option value="Correa de distribución">Correa de distribución</option>
+                        <option value="Filtros">Filtros</option>
+                        <option value="Alineación y balanceo">Alineación y balanceo</option>
+                        <option value="Inspección general">Inspección general</option>
+                        <option value="ITV/VTV">ITV / VTV</option>
+                        <option value="Reparación">Reparación</option>
+                        <option value="Batería">Batería</option>
+                        <option value="Otro">Otro</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Lista de Mantenimientos -->
+            <div id="history-list-container" class="space-y-3">
+                <!-- Se llena dinámicamente desde IndexedDB -->
+            </div>
+        </section>
+
+        <!-- TAB 4: ALERTAS Y CONFIGURACIÓN BD -->
+        <section id="tab-alerts" class="tab-content hidden space-y-4">
+            
+            <!-- Banner Estado IndexedDB -->
+            <div class="bg-slate-800 border border-slate-700/80 rounded-2xl p-3 flex items-center justify-between text-xs">
+                <div class="flex items-center space-x-2">
+                    <span id="db-status-dot" class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span id="db-status-text" class="text-slate-300 font-medium">Conectado a IndexedDB (BD Local)</span>
+                </div>
+                <span class="text-[10px] text-slate-500 font-mono">v1.0</span>
+            </div>
+
+            <!-- Alertas Programadas -->
+            <div class="bg-slate-800 border border-slate-700/80 rounded-2xl p-4">
+                <h2 class="text-sm font-bold text-slate-200 mb-3 flex items-center gap-2">
+                    <i class="fa-solid fa-bell text-amber-500"></i> Próximos Vencimientos y Alertas
+                </h2>
+                <div id="alerts-list-container" class="space-y-2.5">
+                    <!-- Se llena con cálculos en tiempo real desde IndexedDB -->
+                </div>
+            </div>
+
+            <!-- Gestión de Copias y Respaldos -->
+            <div class="bg-slate-800 border border-slate-700/80 rounded-2xl p-4 space-y-3">
+                <h2 class="text-sm font-bold text-slate-200 flex items-center gap-2">
+                    <i class="fa-solid fa-database text-brand-500"></i> Copia de Seguridad y Base de Datos
+                </h2>
+                <p class="text-xs text-slate-400">Los registros están almacenados de forma segura e independiente en IndexedDB.</p>
+                
+                <div class="grid grid-cols-2 gap-2 pt-1">
+                    <button onclick="exportDataJSON()" class="bg-slate-700 active:bg-slate-600 border border-slate-600 rounded-xl py-2 px-3 text-xs text-slate-200 font-medium flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-file-export text-brand-500"></i> Exportar JSON
+                    </button>
+                    <button onclick="exportDataCSV()" class="bg-slate-700 active:bg-slate-600 border border-slate-600 rounded-xl py-2 px-3 text-xs text-slate-200 font-medium flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-file-csv text-accent-500"></i> Exportar CSV
+                    </button>
+                </div>
+
+                <div>
+                    <label class="block w-full bg-slate-900 border border-dashed border-slate-700 rounded-xl py-2.5 px-3 text-center text-xs text-slate-400 cursor-pointer hover:border-brand-500 transition-colors">
+                        <i class="fa-solid fa-file-import mb-1 block text-base text-slate-500"></i>
+                        <span>Importar Respaldo JSON a IndexedDB</span>
+                        <input type="file" id="file-import-json" accept=".json" onchange="importDataJSON(event)" class="hidden">
+                    </label>
+                </div>
+
+                <div class="pt-2 border-t border-slate-700/80 space-y-2">
+                    <button onclick="exitApp()" class="w-full bg-slate-700 hover:bg-slate-600 active:bg-slate-600 text-slate-200 py-2.5 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-right-from-bracket text-red-400"></i> Salir / Cerrar Aplicación
+                    </button>
+                    <button onclick="confirmResetDB()" class="w-full bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20 py-2.5 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-trash-can"></i> Limpiar Base de Datos
+                    </button>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Navegación Inferior Móvil -->
+    <nav class="fixed bottom-0 left-0 right-0 bg-slate-800/95 backdrop-blur-md border-t border-slate-700/80 z-40 max-w-md mx-auto">
+        <div class="grid grid-cols-4 h-16">
+            <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-btn flex flex-col items-center justify-center space-y-1 text-brand-500">
+                <i class="fa-solid fa-chart-pie text-lg"></i>
+                <span class="text-[10px] font-medium">Inicio</span>
+            </button>
+            <button onclick="switchTab('add')" id="nav-add" class="nav-btn flex flex-col items-center justify-center space-y-1 text-slate-400">
+                <i class="fa-solid fa-square-plus text-xl"></i>
+                <span class="text-[10px] font-medium">Registrar</span>
+            </button>
+            <button onclick="switchTab('history')" id="nav-history" class="nav-btn flex flex-col items-center justify-center space-y-1 text-slate-400">
+                <i class="fa-solid fa-list-check text-lg"></i>
+                <span class="text-[10px] font-medium">Historial</span>
+            </button>
+            <button onclick="switchTab('alerts')" id="nav-alerts" class="nav-btn flex flex-col items-center justify-center space-y-1 text-slate-400 relative">
+                <div class="relative">
+                    <i class="fa-solid fa-bell text-lg"></i>
+                    <span id="nav-alert-badge" class="hidden absolute -top-1 -right-2 bg-red-500 text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold">!</span>
+                </div>
+                <span class="text-[10px] font-medium">Alertas</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- MODAL: Actualizar Kilometraje Rápido -->
+    <div id="modal-update-km" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 hidden">
+        <div class="bg-slate-800 w-full max-w-md rounded-t-2xl sm:rounded-2xl border border-slate-700 p-5 space-y-4 shadow-2xl">
+            <div class="flex justify-between items-center">
+                <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                    <i class="fa-solid fa-gauge text-brand-500"></i> Actualizar Odómetro
+                </h3>
+                <button onclick="closeModal('modal-update-km')" class="text-slate-400 text-sm p-1"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div>
+                <label class="block text-xs text-slate-300 font-medium mb-1">Nuevo Kilometraje Total</label>
+                <input type="number" id="input-quick-km" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-3 text-lg font-bold text-slate-100 focus:outline-none focus:border-brand-500">
+            </div>
+            <button onclick="saveQuickKm()" class="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 rounded-xl text-sm transition-colors">
+                Actualizar Kilometraje
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL: Editar Ficha Vehículo -->
+    <div id="modal-edit-vehicle" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 hidden">
+        <div class="bg-slate-800 w-full max-w-md rounded-t-2xl sm:rounded-2xl border border-slate-700 p-5 space-y-4 shadow-2xl">
+            <div class="flex justify-between items-center">
+                <h3 class="text-sm font-bold text-slate-100 flex items-center gap-2">
+                    <i class="fa-solid fa-car text-brand-500"></i> Editar Datos del Vehículo
+                </h3>
+                <button onclick="closeModal('modal-edit-vehicle')" class="text-slate-400 text-sm p-1"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form onsubmit="saveVehicleProfile(event)" class="space-y-3 text-xs">
+                <div>
+                    <label class="block text-slate-300 font-medium mb-1">Marca y Modelo</label>
+                    <input type="text" id="edit-brand-model" required class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-slate-300 font-medium mb-1">Año</label>
+                        <input type="number" id="edit-year" min="1950" max="2030" required class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100">
+                    </div>
+                    <div>
+                        <label class="block text-slate-300 font-medium mb-1">Matrícula / Patente</label>
+                        <input type="text" id="edit-plate" required class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 uppercase">
+                    </div>
+                </div>
+                <button type="submit" class="w-full bg-brand-500 hover:bg-brand-600 text-white font-bold py-3 rounded-xl text-sm transition-colors mt-2">
+                    Guardar Cambios
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: Detalle Completo Mantenimiento -->
+    <div id="modal-detail" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 hidden">
+        <div class="bg-slate-800 w-full max-w-md rounded-t-2xl sm:rounded-2xl border border-slate-700 p-5 space-y-4 shadow-2xl">
+            <div class="flex justify-between items-center">
+                <h3 class="text-sm font-bold text-slate-100" id="detail-title">Detalle del Mantenimiento</h3>
+                <button onclick="closeModal('modal-detail')" class="text-slate-400 text-sm p-1"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="detail-content" class="space-y-3 text-xs text-slate-300">
+                <!-- Inyectado por JS -->
+            </div>
+            <div class="pt-2 grid grid-cols-2 gap-2">
+                <button id="btn-edit-record" class="bg-brand-500/20 border border-brand-500/30 text-brand-400 hover:bg-brand-500/30 font-semibold py-2.5 rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-pen-to-square"></i> Editar
+                </button>
+                <button id="btn-delete-record" class="bg-red-500/20 border border-red-500/30 text-red-400 hover:bg-red-500/30 font-semibold py-2.5 rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-trash"></i> Eliminar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICACIÓN -->
+    <div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-slate-100 border border-slate-700 px-4 py-2.5 rounded-xl text-xs font-medium shadow-xl flex items-center gap-2 transition-all duration-300 opacity-0 pointer-events-none">
+        <i id="toast-icon" class="fa-solid fa-circle-check text-accent-500"></i>
+        <span id="toast-message">Mensaje</span>
+    </div>
+
+    <!-- MOTOR DE BASE DE DATOS INDEXEDDB Y LÓGICA DE APLICACIÓN -->
+    <script>
+        // --- 1. CAPA DE BASE DE DATOS INDEXEDDB ---
+        const DB_NAME = 'VehiculoMantenimientoDB';
+        const DB_VERSION = 1;
+        const STORES = {
+            VEHICLE: 'vehiculo',
+            SERVICES: 'mantenimientos'
+        };
+
+        let db = null;
+
+        // Inicializar IndexedDB con Promesas
+        function initDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+                request.onerror = (event) => {
+                    console.error("Error al abrir IndexedDB:", event.target.error);
+                    updateDBStatus(false, "Error de conexión a IndexedDB");
+                    reject(event.target.error);
+                };
+
+                request.onsuccess = (event) => {
+                    db = event.target.result;
+                    updateDBStatus(true, "Conectado a IndexedDB (BD Local)");
+                    resolve(db);
+                };
+
+                request.onupgradeneeded = (event) => {
+                    const dbInstance = event.target.result;
+
+                    // Store de Perfil de Vehículo (Clave única 'profile')
+                    if (!dbInstance.objectStoreNames.contains(STORES.VEHICLE)) {
+                        dbInstance.createObjectStore(STORES.VEHICLE, { keyPath: 'id' });
+                    }
+
+                    // Store de Registros de Mantenimiento (Clave autogenerada 'id')
+                    if (!dbInstance.objectStoreNames.contains(STORES.SERVICES)) {
+                        const serviceStore = dbInstance.createObjectStore(STORES.SERVICES, { keyPath: 'id' });
+                        serviceStore.createIndex('date', 'date', { unique: false });
+                        serviceStore.createIndex('type', 'type', { unique: false });
+                    }
+                };
+            });
+        }
+
+        // Operaciones de Lectura / Escritura Genéricas en IndexedDB
+        function dbGet(storeName, key) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, 'readonly');
+                const store = tx.objectStore(storeName);
+                const req = store.get(key);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        function dbGetAll(storeName) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, 'readonly');
+                const store = tx.objectStore(storeName);
+                const req = store.getAll();
+                req.onsuccess = () => resolve(req.result || []);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        function dbPut(storeName, data) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, 'readwrite');
+                const store = tx.objectStore(storeName);
+                const req = store.put(data);
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        function dbDelete(storeName, key) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, 'readwrite');
+                const store = tx.objectStore(storeName);
+                const req = store.delete(key);
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        function dbClear(storeName) {
+            return new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, 'readwrite');
+                const store = tx.objectStore(storeName);
+                const req = store.clear();
+                req.onsuccess = () => resolve();
+                req.onerror = () => reject(req.error);
+            });
+        }
+
+        // Migración transparente desde LocalStorage a IndexedDB si existían datos anteriores
+        async function checkAndMigrateFromLocalStorage() {
+            const oldVehicle = localStorage.getItem('v_control_vehicle_profile');
+            const oldServices = localStorage.getItem('v_control_services_list');
+
+            if (oldVehicle || oldServices) {
+                try {
+                    if (oldVehicle) {
+                        const parsedVehicle = JSON.parse(oldVehicle);
+                        parsedVehicle.id = 'profile';
+                        await dbPut(STORES.VEHICLE, parsedVehicle);
+                        localStorage.removeItem('v_control_vehicle_profile');
+                    }
+                    if (oldServices) {
+                        const parsedServices = JSON.parse(oldServices);
+                        for (const s of parsedServices) {
+                            await dbPut(STORES.SERVICES, s);
+                        }
+                        localStorage.removeItem('v_control_services_list');
+                    }
+                    showToast('Datos de localStorage migrados a IndexedDB');
+                } catch(e) {
+                    console.error("Error en migración:", e);
+                }
+            }
+        }
+
+        // --- 2. ESTADO GLOBAL DE LA APLICACIÓN ---
+        let vehicleProfile = {
+            id: 'profile',
+            brandModel: 'Toyota Hilux',
+            year: '2021',
+            plate: 'AB 123 CD',
+            currentKm: 42500
+        };
+
+        let services = [];
+
+        // Inicialización principal
+        window.onload = async function() {
+            try {
+                await initDB();
+                await checkAndMigrateFromLocalStorage();
+                await loadDataFromIndexedDB();
+
+                document.getElementById('input-service-date').valueAsDate = new Date();
+                renderAll();
+            } catch (err) {
+                console.error("Error inicializando la app:", err);
+            }
+        };
+
+        async function loadDataFromIndexedDB() {
+            // Cargar Perfil
+            const storedProfile = await dbGet(STORES.VEHICLE, 'profile');
+            if (storedProfile) {
+                vehicleProfile = storedProfile;
+            } else {
+                // Si no existe, guardar valor predeterminado
+                await dbPut(STORES.VEHICLE, vehicleProfile);
+            }
+
+            // Cargar Mantenimientos
+            services = await dbGetAll(STORES.SERVICES);
+        }
+
+        // --- 3. RENDERIZADO VISUAL ---
+        function renderAll() {
+            renderHeaderAndProfile();
+            renderStats();
+            renderHistory();
+            renderAlerts();
+        }
+
+        function updateDBStatus(connected, message) {
+            const dot = document.getElementById('db-status-dot');
+            const txt = document.getElementById('db-status-text');
+            if (dot && txt) {
+                txt.textContent = message;
+                if (connected) {
+                    dot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse";
+                } else {
+                    dot.className = "w-2.5 h-2.5 rounded-full bg-red-500";
+                }
+            }
+        }
+
+        function renderHeaderAndProfile() {
+            document.getElementById('header-vehicle-name').textContent = vehicleProfile.brandModel || 'Vehículo';
+            document.getElementById('header-vehicle-plate').textContent = vehicleProfile.plate || 'SIN MATRÍCULA';
+            document.getElementById('header-km-display').textContent = `${Number(vehicleProfile.currentKm).toLocaleString()} km`;
+
+            document.getElementById('info-brand-model').textContent = vehicleProfile.brandModel || '-';
+            document.getElementById('info-year').textContent = vehicleProfile.year || '-';
+            document.getElementById('info-plate').textContent = vehicleProfile.plate || '-';
+            document.getElementById('info-km').textContent = `${Number(vehicleProfile.currentKm).toLocaleString()} km`;
+
+            document.getElementById('input-quick-km').value = vehicleProfile.currentKm;
+        }
+
+        function renderStats() {
+            const totalCost = services.reduce((acc, s) => acc + (parseFloat(s.cost) || 0), 0);
+            const avgCost = services.length > 0 ? totalCost / services.length : 0;
+
+            // Calcular Costo por Kilómetro
+            let costPerKm = 0;
+            if (services.length > 0) {
+                const kms = services.map(s => Number(s.km)).filter(k => !isNaN(k));
+                if (kms.length > 0) {
+                    const minKm = Math.min(...kms);
+                    const maxKm = Math.max(Number(vehicleProfile.currentKm), Math.max(...kms));
+                    const kmDiff = maxKm - minKm;
+                    if (kmDiff > 0) {
+                        costPerKm = totalCost / kmDiff;
+                    }
+                }
+            }
+
+            document.getElementById('stat-total-cost').textContent = `$${totalCost.toLocaleString('es-ES', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            document.getElementById('stat-avg-cost').textContent = `$${avgCost.toLocaleString('es-ES', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+            document.getElementById('stat-cost-per-km').textContent = `$${costPerKm.toFixed(2)}`;
+
+            // Último Servicio en Dashboard
+            const lastServiceContainer = document.getElementById('dashboard-last-service');
+            if (services.length > 0) {
+                const sorted = [...services].sort((a, b) => new Date(b.date) - new Date(a.date));
+                const last = sorted[0];
+                lastServiceContainer.innerHTML = `
+                    <div class="flex justify-between items-center text-xs">
+                        <div>
+                            <span class="font-semibold text-slate-200 block text-left">${escapeHTML(last.type)}</span>
+                            <span class="text-slate-400 text-[11px] block text-left">${formatDate(last.date)} • ${Number(last.km).toLocaleString()} km</span>
+                        </div>
+                        <span class="font-bold text-accent-500">$${parseFloat(last.cost).toFixed(2)}</span>
+                    </div>
+                `;
+            } else {
+                lastServiceContainer.innerHTML = `<span class="text-xs text-slate-500">Sin mantenimientos en IndexedDB</span>`;
+            }
+        }
+
+        function renderHistory() {
+            const container = document.getElementById('history-list-container');
+            const search = document.getElementById('search-history').value.toLowerCase();
+            const filterType = document.getElementById('filter-service-type').value;
+
+            let filtered = [...services].sort((a, b) => new Date(b.date) - new Date(a.date));
+
+            filtered = filtered.filter(s => {
+                const matchesType = filterType === 'ALL' || s.type === filterType;
+                const matchesSearch = s.type.toLowerCase().includes(search) || 
+                                      (s.workshop && s.workshop.toLowerCase().includes(search)) ||
+                                      (s.notes && s.notes.toLowerCase().includes(search));
+                return matchesType && matchesSearch;
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-8 text-slate-500 text-xs">
+                        <i class="fa-solid fa-folder-open text-2xl mb-2 block"></i>
+                        No se encontraron registros de mantenimiento.
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = filtered.map(s => `
+                <div onclick="openDetailModal('${s.id}')" class="bg-slate-800 border border-slate-700/70 active:bg-slate-700/50 p-3.5 rounded-2xl flex items-center justify-between cursor-pointer transition-colors">
+                    <div class="space-y-0.5">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-bold text-slate-100">${escapeHTML(s.type)}</span>
+                        </div>
+                        <div class="text-[11px] text-slate-400 flex items-center gap-2">
+                            <span><i class="fa-regular fa-calendar text-[10px]"></i> ${formatDate(s.date)}</span>
+                            <span>•</span>
+                            <span><i class="fa-solid fa-gauge text-[10px]"></i> ${Number(s.km).toLocaleString()} km</span>
+                        </div>
+                        ${s.workshop ? `<div class="text-[10px] text-slate-500"><i class="fa-solid fa-wrench"></i> ${escapeHTML(s.workshop)}</div>` : ''}
+                    </div>
+                    <div class="text-right">
+                        <span class="text-xs font-bold text-slate-100 block">$${parseFloat(s.cost).toFixed(2)}</span>
+                        <i class="fa-solid fa-chevron-right text-slate-600 text-[10px]"></i>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function renderAlerts() {
+            const container = document.getElementById('alerts-list-container');
+            const navBadge = document.getElementById('nav-alert-badge');
+            const summaryBanner = document.getElementById('alert-summary-banner');
+            const summaryText = document.getElementById('alert-summary-text');
+
+            let alerts = [];
+            const currKm = Number(vehicleProfile.currentKm);
+            const today = new Date();
+
+            services.forEach(s => {
+                if (s.nextKm) {
+                    const diffKm = Number(s.nextKm) - currKm;
+                    if (diffKm <= 0) {
+                        alerts.push({
+                            level: 'danger',
+                            title: `Vencido: ${s.type}`,
+                            desc: `Superado por ${Math.abs(diffKm).toLocaleString()} km (Límite: ${Number(s.nextKm).toLocaleString()} km)`
+                        });
+                    } else if (diffKm <= 1000) {
+                        alerts.push({
+                            level: 'warning',
+                            title: `Próximo: ${s.type}`,
+                            desc: `Faltan ${diffKm.toLocaleString()} km para el mantenimiento.`
+                        });
+                    }
+                }
+
+                if (s.nextDate) {
+                    const targetDate = new Date(s.nextDate);
+                    const diffDays = Math.ceil((targetDate - today) / (1000 * 60 * 60 * 24));
+                    if (diffDays <= 0) {
+                        alerts.push({
+                            level: 'danger',
+                            title: `Vencido por fecha: ${s.type}`,
+                            desc: `Venció el ${formatDate(s.nextDate)}`
+                        });
+                    } else if (diffDays <= 15) {
+                        alerts.push({
+                            level: 'warning',
+                            title: `Próximo a vencer: ${s.type}`,
+                            desc: `Vence el ${formatDate(s.nextDate)} (en ${diffDays} días)`
+                        });
+                    }
+                }
+            });
+
+            if (alerts.length > 0) {
+                navBadge.classList.remove('hidden');
+                summaryBanner.classList.remove('hidden');
+                summaryText.textContent = `Tienes ${alerts.length} mantenimiento(s) pendientes o próximos a vencer.`;
+            } else {
+                navBadge.classList.add('hidden');
+                summaryBanner.classList.add('hidden');
+            }
+
+            if (alerts.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-6 text-slate-500 text-xs">
+                        <i class="fa-solid fa-circle-check text-accent-500 text-2xl mb-2 block"></i>
+                        Sin alertas vigentes. Todos los mantenimientos están al día.
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = alerts.map(a => `
+                <div class="p-3 rounded-xl border flex items-start gap-3 ${
+                    a.level === 'danger' 
+                    ? 'bg-red-500/10 border-red-500/30 text-red-300' 
+                    : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                }">
+                    <i class="fa-solid ${a.level === 'danger' ? 'fa-circle-exclamation text-red-500' : 'fa-clock text-amber-500'} mt-0.5 text-sm"></i>
+                    <div>
+                        <h4 class="text-xs font-bold leading-tight">${escapeHTML(a.title)}</h4>
+                        <p class="text-[11px] opacity-80 mt-0.5">${escapeHTML(a.desc)}</p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // --- 4. ACCIONES Y OPERACIONES ASÍNCRONAS ---
+        async function handleSaveService(e) {
+            e.preventDefault();
+
+            const serviceId = document.getElementById('input-service-id').value || Date.now().toString();
+            const date = document.getElementById('input-service-date').value;
+            const type = document.getElementById('input-service-type').value;
+            const km = parseFloat(document.getElementById('input-service-km').value);
+            const cost = parseFloat(document.getElementById('input-service-cost').value);
+            const workshop = document.getElementById('input-service-workshop').value;
+            const notes = document.getElementById('input-service-notes').value;
+            const nextKm = document.getElementById('input-next-km').value;
+            const nextDate = document.getElementById('input-next-date').value;
+
+            const serviceData = {
+                id: serviceId,
+                date,
+                type,
+                km,
+                cost,
+                workshop,
+                notes,
+                nextKm: nextKm ? parseFloat(nextKm) : null,
+                nextDate: nextDate || null
+            };
+
+            // Guardar en IndexedDB
+            await dbPut(STORES.SERVICES, serviceData);
+
+            // Actualizar Odómetro si es mayor
+            if (km > vehicleProfile.currentKm) {
+                vehicleProfile.currentKm = km;
+                await dbPut(STORES.VEHICLE, vehicleProfile);
+            }
+
+            await loadDataFromIndexedDB();
+            renderAll();
+
+            resetServiceForm();
+            showToast('Mantenimiento guardado en IndexedDB');
+            switchTab('history');
+        }
+
+        function resetServiceForm() {
+            document.getElementById('form-add-service').reset();
+            document.getElementById('input-service-id').value = '';
+            document.getElementById('input-service-date').valueAsDate = new Date();
+            document.getElementById('form-service-title').innerHTML = `<i class="fa-solid fa-circle-plus text-accent-500"></i> Nuevo Mantenimiento`;
+            document.getElementById('btn-cancel-edit').classList.add('hidden');
+            document.getElementById('btn-save-service').className = "w-full bg-brand-500 hover:bg-brand-600 active:scale-[0.98] text-white font-bold py-3 px-4 rounded-xl shadow-md transition-all text-xs flex items-center justify-center gap-2";
+        }
+
+        async function saveQuickKm() {
+            const val = parseFloat(document.getElementById('input-quick-km').value);
+            if (!isNaN(val) && val >= 0) {
+                vehicleProfile.currentKm = val;
+                await dbPut(STORES.VEHICLE, vehicleProfile);
+                await loadDataFromIndexedDB();
+                renderAll();
+                closeModal('modal-update-km');
+                showToast('Kilometraje actualizado');
+            }
+        }
+
+        function openEditVehicleModal() {
+            document.getElementById('edit-brand-model').value = vehicleProfile.brandModel || '';
+            document.getElementById('edit-year').value = vehicleProfile.year || '';
+            document.getElementById('edit-plate').value = vehicleProfile.plate || '';
+            openModal('modal-edit-vehicle');
+        }
+
+        async function saveVehicleProfile(e) {
+            e.preventDefault();
+            vehicleProfile.brandModel = document.getElementById('edit-brand-model').value;
+            vehicleProfile.year = document.getElementById('edit-year').value;
+            vehicleProfile.plate = document.getElementById('edit-plate').value;
+            
+            await dbPut(STORES.VEHICLE, vehicleProfile);
+            await loadDataFromIndexedDB();
+            renderAll();
+            closeModal('modal-edit-vehicle');
+            showToast('Datos del vehículo actualizados');
+        }
+
+        function openDetailModal(id) {
+            const item = services.find(s => s.id === id);
+            if (!item) return;
+
+            document.getElementById('detail-title').textContent = item.type;
+            document.getElementById('detail-content').innerHTML = `
+                <div class="bg-slate-900/60 p-3 rounded-xl space-y-2 border border-slate-700/50">
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">Fecha:</span>
+                        <span class="font-medium text-slate-100">${formatDate(item.date)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">Kilometraje:</span>
+                        <span class="font-medium text-slate-100">${Number(item.km).toLocaleString()} km</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">Costo:</span>
+                        <span class="font-bold text-accent-500">$${parseFloat(item.cost).toFixed(2)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-slate-400">Taller/Mecánico:</span>
+                        <span class="font-medium text-slate-100">${item.workshop ? escapeHTML(item.workshop) : 'No especificado'}</span>
+                    </div>
+                </div>
+
+                ${item.notes ? `
+                    <div>
+                        <span class="text-slate-400 block mb-1">Observaciones:</span>
+                        <div class="bg-slate-900/40 p-2.5 rounded-xl border border-slate-700/50 text-slate-200">
+                            ${escapeHTML(item.notes)}
+                        </div>
+                    </div>
+                ` : ''}
+
+                ${(item.nextKm || item.nextDate) ? `
+                    <div class="bg-slate-900/40 p-2.5 rounded-xl border border-slate-700/50 space-y-1">
+                        <span class="text-brand-500 font-semibold block mb-1">Próximo servicio programado:</span>
+                        ${item.nextKm ? `<div class="flex justify-between"><span class="text-slate-400">Objetivo Km:</span> <span>${Number(item.nextKm).toLocaleString()} km</span></div>` : ''}
+                        ${item.nextDate ? `<div class="flex justify-between"><span class="text-slate-400">Objetivo Fecha:</span> <span>${formatDate(item.nextDate)}</span></div>` : ''}
+                    </div>
+                ` : ''}
+            `;
+
+            document.getElementById('btn-edit-record').onclick = () => {
+                closeModal('modal-detail');
+                editRecord(item.id);
+            };
+            document.getElementById('btn-delete-record').onclick = () => deleteRecord(item.id);
+            openModal('modal-detail');
+        }
+
+        function editRecord(id) {
+            const item = services.find(s => s.id === id);
+            if (!item) return;
+
+            document.getElementById('input-service-id').value = item.id;
+            document.getElementById('input-service-date').value = item.date;
+            document.getElementById('input-service-type').value = item.type;
+            document.getElementById('input-service-km').value = item.km;
+            document.getElementById('input-service-cost').value = item.cost;
+            document.getElementById('input-service-workshop').value = item.workshop || '';
+            document.getElementById('input-service-notes').value = item.notes || '';
+            document.getElementById('input-next-km').value = item.nextKm || '';
+            document.getElementById('input-next-date').value = item.nextDate || '';
+
+            document.getElementById('form-service-title').innerHTML = `<i class="fa-solid fa-pen-to-square text-brand-500"></i> Editar Mantenimiento`;
+            document.getElementById('btn-cancel-edit').classList.remove('hidden');
+            document.getElementById('btn-save-service').className = "w-2/3 bg-brand-500 hover:bg-brand-600 active:scale-[0.98] text-white font-bold py-3 px-4 rounded-xl shadow-md transition-all text-xs flex items-center justify-center gap-2";
+
+            switchTab('add');
+        }
+
+        async function deleteRecord(id) {
+            await dbDelete(STORES.SERVICES, id);
+            await loadDataFromIndexedDB();
+            renderAll();
+            closeModal('modal-detail');
+            showToast('Registro eliminado de IndexedDB', 'trash');
+        }
+
+        async function confirmResetDB() {
+            if (confirm("¿Estás seguro de que deseas eliminar TODOS los registros de IndexedDB? Esta acción no se puede deshacer.")) {
+                await dbClear(STORES.SERVICES);
+                await dbClear(STORES.VEHICLE);
+                
+                vehicleProfile = { id: 'profile', brandModel: '', year: '', plate: '', currentKm: 0 };
+                await dbPut(STORES.VEHICLE, vehicleProfile);
+                
+                await loadDataFromIndexedDB();
+                renderAll();
+                showToast('Base de datos reiniciada');
+            }
+        }
+
+        // --- 5. EXPORTACIÓN E IMPORTACIÓN INDEXEDDB ---
+        async function exportDataJSON() {
+            const currentVehicle = await dbGet(STORES.VEHICLE, 'profile');
+            const currentServices = await dbGetAll(STORES.SERVICES);
+
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({ 
+                vehicleProfile: currentVehicle, 
+                services: currentServices 
+            }, null, 2));
+
+            const downloadAnchor = document.createElement('a');
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", `mantenimiento_indexeddb_${currentVehicle?.plate || 'vehiculo'}.json`);
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+        }
+
+        async function exportDataCSV() {
+            const currentServices = await dbGetAll(STORES.SERVICES);
+            if (currentServices.length === 0) {
+                showToast('No hay datos en IndexedDB para exportar', 'exclamation');
+                return;
+            }
+
+            let csvContent = "data:text/csv;charset=utf-8,ID,Fecha,Tipo,Kilometraje,Costo,Taller,Notas,ProximoKm,ProximaFecha\n";
+            currentServices.forEach(s => {
+                const row = [
+                    s.id,
+                    s.date,
+                    `"${(s.type || '').replace(/"/g, '""')}"`,
+                    s.km,
+                    s.cost,
+                    `"${(s.workshop || '').replace(/"/g, '""')}"`,
+                    `"${(s.notes || '').replace(/"/g, '""')}"`,
+                    s.nextKm || '',
+                    s.nextDate || ''
+                ].join(",");
+                csvContent += row + "\n";
+            });
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `mantenimientos_${vehicleProfile.plate || 'vehiculo'}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        }
+
+        function importDataJSON(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async function(evt) {
+                try {
+                    const parsed = JSON.parse(evt.target.result);
+                    if (parsed.vehicleProfile && Array.isArray(parsed.services)) {
+                        await dbClear(STORES.SERVICES);
+                        await dbPut(STORES.VEHICLE, parsed.vehicleProfile);
+                        
+                        for (const s of parsed.services) {
+                            await dbPut(STORES.SERVICES, s);
+                        }
+
+                        await loadDataFromIndexedDB();
+                        renderAll();
+                        showToast('Base de datos restaurada desde JSON');
+                    } else {
+                        showToast('Archivo JSON no válido', 'exclamation');
+                    }
+                } catch(err) {
+                    showToast('Error al procesar el archivo', 'exclamation');
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // --- NAVEGACIÓN Y UTILS ---
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.getElementById(`tab-${tabId}`).classList.remove('hidden');
+
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.classList.remove('text-brand-500');
+                btn.classList.add('text-slate-400');
+            });
+            document.getElementById(`nav-${tabId}`).classList.remove('text-slate-400');
+            document.getElementById(`nav-${tabId}`).classList.add('text-brand-500');
+        }
+
+        function exitApp() {
+            // Cierra la pestaña si el navegador lo permite
+            window.close();
+            
+            // Si la política de seguridad del navegador bloquea window.close(), desplegamos la pantalla limpia de confirmación
+            setTimeout(() => {
+                const exitScreen = document.getElementById('screen-exit');
+                if (exitScreen) {
+                    exitScreen.classList.remove('hidden');
+                }
+            }, 100);
+        }
+
+        function reopenApp() {
+            const exitScreen = document.getElementById('screen-exit');
+            if (exitScreen) {
+                exitScreen.classList.add('hidden');
+            }
+        }
+
+        function openModal(modalId) {
+            document.getElementById(modalId).classList.remove('hidden');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.add('hidden');
+        }
+
+        function showToast(msg, icon = 'check') {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-message');
+            const toastIcon = document.getElementById('toast-icon');
+
+            toastMsg.textContent = msg;
+            toastIcon.className = `fa-solid fa-circle-${icon} text-accent-500`;
+
+            toast.classList.remove('opacity-0', 'pointer-events-none');
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'pointer-events-none');
+            }, 2500);
+        }
+
+        function formatDate(dateString) {
+            if (!dateString) return '-';
+            const parts = dateString.split('-');
+            if (parts.length === 3) {
+                return `${parts[2]}/${parts[1]}/${parts[0]}`;
+            }
+            return dateString;
+        }
+
+        function escapeHTML(str) {
+            if (!str) return '';
+            return str.replace(/[&<>'"]/g, 
+                tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
+            );
+        }
+    </script>
+</body>
+</html>
